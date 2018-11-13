@@ -34,13 +34,13 @@ USER_AGENTS=[
     'Mozilla/5.0 (compatible; Konqueror/3.5; Linux) KHTML/3.5.5 (like Gecko) (Kubuntu)',
     'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0; ZoomSpider.net bot; .NET CLR 1.1.4322)',
     'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; QihooBot 1.0 qihoobot@qihoo.net)']
-#MY_PROXY = { "http":"127.0.0.1:8080","https":"127.0.0.1:8080"}
+# MY_PROXY = { "http":"127.0.0.1:8888","https":"127.0.0.1:8888"}
 MY_PROXY = {}
 bing_api = "http://cn.bing.com/search?q=site%3A"
 baidu_api = "http://www.baidu.com/s?wd=site%3A"
 ping_api = "https://ping.aizhan.com/api/ping?callback=flightHandler"
-censys_api_id = ""
-censys_api_secret = ""
+censys_api_id = "61f0295a-256e-4e22-9933-4642167f4ceb"
+censys_api_secret = "mOEXlfPWdjAzoq1uAmtirjiXZsaZOSek"
 
 domain_queue = Queue.Queue()
 Lock = threading.Lock()
@@ -58,7 +58,6 @@ class Collector(threading.Thread):
         while not self.domain_queue.empty():
             host = self.domain_queue.get()
             output('Starting scan target : %s'%host, 'green')
-            # self.getCensys('119.9.95.8')
             self.save_report(host,self.getTitle(host),self.getRealIp(host),self.getSearch(host))
             output('Complete scan target : %s'%host, 'green')
     def getSearch(self,host):
@@ -68,7 +67,7 @@ class Collector(threading.Thread):
             resp2 = requests.get(baidu_api+host,timeout=TIME_OUT)
         except Exception,e:
             logging.error(e)
-            return []
+            return returns
         if resp1.status_code == 200:
             results = re.findall('<h2><a target="_blank" href="(.*?)" h="ID=.*?">(.*?)</a></h2>',resp1.text)
             if results:
@@ -84,12 +83,12 @@ class Collector(threading.Thread):
         if not host.startswith('http'):
             host = "http://"+host
         try:
-            resp = requests.get(host,timeout=TIME_OUT, headers={"User-Agent": random.choice(USER_AGENTS)}, allow_redirects=True)
+            resp = requests.get(host,timeout=TIME_OUT, headers={"User-Agent": random.choice(USER_AGENTS)}, allow_redirects=True, proxies=MY_PROXY)
         except Exception,e:
             logging.error(e)
             host = host.replace("http","https")
             try:
-                resp = requests.get(host,timeout=TIME_OUT, headers={"User-Agent": random.choice(USER_AGENTS)}, allow_redirects=True, verify=False)
+                resp = requests.get(host,timeout=TIME_OUT, headers={"User-Agent": random.choice(USER_AGENTS)}, allow_redirects=True, verify=False, proxies=MY_PROXY)
             except Exception,e:
                 logging.error(e)
                 return "del~"
@@ -133,7 +132,7 @@ class Collector(threading.Thread):
                         new_ips.append(ip)
                 ip_list = new_ips
                 if len(ip_list)==1:
-                    message = "%s"%(ip_list[0])
+                    message = "<a href='https://censys.io/ipv4/%s'>%s</a>"%(ip_list[0],ip_list[0])
                     Sourceip.append(ip_list)
                 elif len(ip_list)>=2:
                     message = '</br>'.join(ip_list)
@@ -155,6 +154,7 @@ class Collector(threading.Thread):
 
 #标准化输出
 def output(info, color='white'):
+    with Lock:
         print colored("[%s] %s"%(time.strftime('%H:%M:%S',time.localtime(time.time())), info),color)
 #生成报告
 def save_report():
@@ -282,11 +282,13 @@ def init():
             if str(sys.argv[2]).endswith('.txt'):
                 with open(sys.argv[2],'r') as list:
                     for domain in list.readlines():
-                        domain_queue.put(domain.rstrip('\n'))
+                        domain = domain.rstrip('\n')
+                        domain_queue.put(domain.rstrip('\r'))
             else:
                 usage()
                 sys.exit()
         if sys.argv[1] == '-i':
+            ip = []
             target = sys.argv[2]
             #子域名收集
             cert_list = search_cert_from_crt(target)
@@ -315,10 +317,15 @@ def init():
         [thread.start() for thread in threads]
         [thread.join() for thread in threads]
         save_report()
-        print '[+] Sourceip'
-        with open(target+"-Sourceip.txt",'w') as Sourceip_output:
+        if sys.argv[1] == '-i':
+            print '[+] Sourceip'
+            with open(target+"-Sourceip.txt",'w') as Sourceip_output:
+                for i in Sourceip:
+                    Sourceip_output.write(i[0]+'\n')
+                    print i[0]
+        else:
+            print '[+] Sourceip'
             for i in Sourceip:
-                Sourceip_output.write(i[0]+'\n')
                 print i[0]
         print '\n[*] shutting down at %s\n'%time.strftime('%H:%M:%S',time.localtime(time.time()))
     else:
