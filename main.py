@@ -34,13 +34,13 @@ USER_AGENTS=[
     'Mozilla/5.0 (compatible; Konqueror/3.5; Linux) KHTML/3.5.5 (like Gecko) (Kubuntu)',
     'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0; ZoomSpider.net bot; .NET CLR 1.1.4322)',
     'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; QihooBot 1.0 qihoobot@qihoo.net)']
-# MY_PROXY = { "http":"127.0.0.1:8888","https":"127.0.0.1:8888"}
+#MY_PROXY = { "http":"127.0.0.1:8888","https":"127.0.0.1:8888"}
 MY_PROXY = {}
-bing_api = "http://cn.bing.com/search?q=site%3A"
+bing_api = "http://www.bing.com/search?q=site%3A"
 baidu_api = "http://www.baidu.com/s?wd=site%3A"
 ping_api = "https://ping.aizhan.com/api/ping?callback=flightHandler"
-censys_api_id = "61f0295a-256e-4e22-9933-4642167f4ceb"
-censys_api_secret = "mOEXlfPWdjAzoq1uAmtirjiXZsaZOSek"
+censys_api_id = ""
+censys_api_secret = ""
 
 domain_queue = Queue.Queue()
 Lock = threading.Lock()
@@ -63,7 +63,7 @@ class Collector(threading.Thread):
     def getSearch(self,host):
         returns = []
         try:
-            resp1 = requests.get(bing_api+host,timeout=TIME_OUT)
+            resp1 = requests.get(bing_api+host,timeout=TIME_OUT, allow_redirects=True)
             resp2 = requests.get(baidu_api+host,timeout=TIME_OUT)
         except Exception,e:
             logging.error(e)
@@ -77,7 +77,8 @@ class Collector(threading.Thread):
             results = re.findall('none;">(.*?)&nbsp;</a>.*?{"title":"(.*?)","url":"(.*?)"}',resp2.text)
             if results:
                 for result in results:
-                    returns.append("BaiDu|%s|<a href=\"%s\" target=\"_blank\">%s</a></br>"%(result[1],result[2],result[0]))
+                    resp = requests.get(result[2],timeout=TIME_OUT, allow_redirects=False)
+                    returns.append("BaiDu|%s|<a href=\"%s\" target=\"_blank\">%s</a></br>"%(result[1],resp.headers['Location'],resp.headers['Location']))
         return returns
     def getTitle(self,host):
         if not host.startswith('http'):
@@ -92,34 +93,37 @@ class Collector(threading.Thread):
             except Exception,e:
                 logging.error(e)
                 return "del~"
+
         try:
             resp.encoding = requests.utils.get_encodings_from_content(resp.content)[0]
         except:
             resp.encoding = 'utf-8'
-        soup = BeautifulSoup(resp.content)
+        soup = BeautifulSoup(resp.content, "html.parser")
         try:
             title = soup.title.string
-        except:
+        except Exception,e:
+            #print e
             title = '获取失败'
-        if 'Server' in resp.headers and title is not None:
+        if 'Server' in resp.headers:
             title = title+'<td>'+resp.headers['server']+'</td>'
-        else:
-            title = '获取失败<td></td>'
+        else :
+            title = title+'<td></td>'
         return title
     def getRealIp(self,host):
-        message='api fail'
         cookies={}
         for line in ping_Cookie.split(';'):
             if '=' in line:
                 name,value=line.strip().split('=',1)
                 cookies[name]=value
         try:
-            data = {"type":"ping","domain":host,"_csrf":ping_csrf}
-            resp = self.s.post(ping_api, data=data, cookies=cookies, timeout=10, proxies=MY_PROXY)
-        except Exception,e:
-            try:
-                data = {"type":"http","domain":host,"_csrf":ping_csrf}
+            with Lock:
+                data = {"type":"ping","domain":host,"_csrf":ping_csrf}
                 resp = self.s.post(ping_api, data=data, cookies=cookies, timeout=10, proxies=MY_PROXY)
+        except:
+            try:
+                with Lock:
+                    data = {"type":"http","domain":host,"_csrf":ping_csrf}
+                    resp = self.s.post(ping_api, data=data, cookies=cookies, timeout=10, proxies=MY_PROXY)
             except Exception,e:
                 logging.error("[*]%s %s"%(host,e))
                 return
@@ -132,25 +136,26 @@ class Collector(threading.Thread):
                         new_ips.append(ip)
                 ip_list = new_ips
                 if len(ip_list)==1:
-                    message = "<a href='https://censys.io/ipv4/%s'>%s</a>"%(ip_list[0],ip_list[0])
                     Sourceip.append(ip_list)
+                    return "<a href='https://censys.io/ipv4/%s'>%s</a>"%(ip_list[0],ip_list[0])
                 elif len(ip_list)>=2:
-                    message = '</br>'.join(ip_list)
-        return message
+                    return '</br>'.join(ip_list)
+        return 'api fail'
     def save_report(self,host,title,ip,search_result):
         if search_result:
             if title == 'del~':
-                result_list.append("<tr><td>%s</td><td></td><td></td><td>%s</td><td>"%(host,ip))
+                result_list.append("<tr><td>%s</td><td></td><td></td><td>%s</td><td></td></tr>"%(host,ip))
                 for result in search_result:
                     result_list.append(result.encode("utf-8"))
                 result_list.append("</td></tr>")
             else:
-                result_list.append("<tr><td><a href=\"http://%s\">%s</a></td><td>%s</td><td>%s</td><td>"%(host,host,title,ip))
+                result_list.append(("<tr><td><a href=\"http://%s\">%s</a></td><td>%s</td><td>%s</td><td>"%(host,host,title,ip)).encode("utf-8"))
                 for result in search_result:
                     result_list.append(result.encode("utf-8"))
                 result_list.append("</td></tr>")
         else:
-            result_list.append("<tr><td>%s</td><td></td><td></td><td>%s</td><td></td></tr>"%(host,ip))
+            result_list.append(("<tr><td><a href=\"http://%s\">%s</a></td><td>%s</td><td>%s</td><td>"%(host, host, title, ip)).encode("utf-8"))
+            result_list.append("</td></tr>")
 
 #标准化输出
 def output(info, color='white'):
@@ -158,11 +163,12 @@ def output(info, color='white'):
         print colored("[%s] %s"%(time.strftime('%H:%M:%S',time.localtime(time.time())), info),color)
 #生成报告
 def save_report():
-    with open("%s_result.html"%time.strftime("%Y-%m-%d,%H-%M-%S", time.localtime()),'a') as report:
-        report.write("<html><head><title></title><style>body {width:auto; margin:auto; margin-top:10px; background:rgb(200,200,200);}p {color: #666;}th {color:#002E8C; font-size: 1em; padding-top:5px;}</style></head><body><table border=\"1\"><tr><th>Target</th><th>Title</th><th>Server</th><th>SourceIp</th><th>SpiderUrl</th></tr>")
+    with open("./reports/%s_result.html"%time.strftime("%Y-%m-%d,%H-%M-%S", time.localtime()),'a') as report:
+        report.write("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"><title>信息收集报告</title><style>body {width:auto; margin:auto; margin-top:10px; background:rgb(200,200,200);}p {color: #666;}th {color:#002E8C; font-size: 1em; padding-top:5px;}</style></head><body><table border=\"1\"><tr><th>Target</th><th>Title</th><th>Server</th><th>SourceIp</th><th>SpiderUrl</th></tr>")
         for result in result_list:
             report.write(result)
         report.write("</table></body></html>")
+
 def search_cert_from_crt(target):
     output("Start search_cert_from_crt",'green')
     crt_api = "https://crt.sh/?q=%"
@@ -296,7 +302,7 @@ def init():
             domains.extend(search_subdomain_from_threatcrowd(target))
             domains.extend(search_subdomain_from_findsubdomain(target))
             domains = set(domains)
-            with open(target+"-domains.txt",'w') as domains_output:
+            with open("./history/%s-domains.txt"%target,'w') as domains_output:
                 for i in domains:
                     domain_queue.put(i)
                     domains_output.write(i+'\n')
@@ -319,7 +325,7 @@ def init():
         save_report()
         if sys.argv[1] == '-i':
             print '[+] Sourceip'
-            with open(target+"-Sourceip.txt",'w') as Sourceip_output:
+            with open("./history/%s-Sourceip.txt"%target,'w') as Sourceip_output:
                 for i in Sourceip:
                     Sourceip_output.write(i[0]+'\n')
                     print i[0]

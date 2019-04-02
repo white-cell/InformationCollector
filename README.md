@@ -29,6 +29,14 @@ Usage: python main.py -i baidu.com
 * 还有很多很棒的接口，但是都会有次数限制，就像censys一个月只能100次
 
 # 输出
-* 子域名相关指纹和爬虫信息输出到html文件
-* 子域名输出到txt
-* 源ip输出到txt
+* 子域名相关指纹和爬虫信息输出到report目录html文件
+* 子域名、源ip输出到history目录txt文件
+
+# 运行
+![](https://github.com/white-cell/InformationCollector/blob/master/1.jpg)
+![](https://github.com/white-cell/InformationCollector/blob/master/2.jpg)
+# 更新
+## 2019-04-02
+* 修复获取部分title bug
+* 调整获取搜索引擎结果正则
+* 调整输出报告格式
